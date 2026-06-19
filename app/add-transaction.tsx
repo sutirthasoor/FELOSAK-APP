@@ -24,14 +24,140 @@ import { useLanguage } from "@/context/LanguageContext";
 import Colors from "@/constants/colors";
 import type { TranslationKey } from "@/i18n/translations";
 import { today, parseAmount, isValidDateStr, getCurrencyCode, getCurrencySymbol, subscribeToCurrencyChanges } from "@/utils/format";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from "@/context/AuthContext";
 
-const INCOME_CATEGORIES = [
-  "Sales", "Services", "Consulting", "Rent Received", "Investment", "Refund", "Other Income",
+// ✅ GOAL CATEGORIES
+const GOAL_CATEGORIES = [
+  "Emergency Fund",
+  "New Car",
+  "Vacation",
+  "House Down Payment",
+  "Retirement",
+  "Education Fund",
+  "Business Startup",
+  "Debt Payoff",
+  "Investment",
+  "Wedding",
+  "Baby Fund",
+  "Home Renovation",
 ];
 
+// ✅ INVESTMENT CATEGORIES - For INCOME only
+const INCOME_INVESTMENT_CATEGORIES = [
+  "Investment Income",
+  "Dividend",
+  "Capital Gains",
+  "Interest Income",
+  "Rental Income",
+  "Stock Profit",
+  "Crypto Profit",
+];
+
+const INCOME_SAVINGS_CATEGORIES = [
+  "Savings",
+  "Goal Contribution",
+  "Savings Deposit",
+  "Goal Fund",
+  "Emergency Fund",
+];
+
+// ✅ INVESTMENT CATEGORIES - For EXPENSE only
+const EXPENSE_INVESTMENT_CATEGORIES = [
+  "Investment",
+  "Stocks",
+  "Bonds",
+  "Mutual Fund",
+  "Real Estate",
+  "Property",
+  "Crypto",
+  "Bitcoin",
+  "Ethereum",
+  "Gold",
+  "Silver",
+  "Fixed Deposit",
+  "Brokerage",
+  "Trading Fee",
+  "Property Maintenance",
+];
+
+// ✅ DEBT CATEGORIES - For EXPENSE only (Debt payments)
+const EXPENSE_DEBT_CATEGORIES = [
+  "Loan Payment",
+  "Credit Card Payment",
+  "Mortgage Payment",
+  "Student Loan Payment",
+  "Personal Loan Payment",
+  "Car Loan Payment",
+  "EMI Payment",
+  "Debt Repayment",
+];
+
+// ✅ DEBT CATEGORIES - For INCOME only (Money received from loans)
+const INCOME_DEBT_CATEGORIES = [
+  "Loan Received",
+  "Debt Collection Received",
+];
+
+// ✅ REGULAR INCOME CATEGORIES (No Investment/Debt)
+const REGULAR_INCOME_CATEGORIES = [
+  "Sales", 
+  "Services", 
+  "Consulting", 
+  "Rent Received", 
+  "Refund", 
+  "Other Income",
+  "Salary",
+  "Freelance",
+  "Bonus",
+  "Commission",
+  "Gift",
+];
+
+// ✅ REGULAR EXPENSE CATEGORIES (No Investment/Debt)
+const REGULAR_EXPENSE_CATEGORIES = [
+  "Inventory", 
+  "Salaries", 
+  "Rent", 
+  "Utilities", 
+  "Marketing", 
+  "Transport",
+  "Maintenance", 
+  "Taxes", 
+  "Supplies", 
+  "Equipment", 
+  "Other Expense",
+  "Groceries",
+  "Dining",
+  "Entertainment",
+  "Shopping",
+  "Healthcare",
+  "Insurance",
+  "Education",
+];
+
+const EXPENSE_SAVINGS_CATEGORIES = [
+  "Savings Transfer",
+  "Goal Savings",
+  "Emergency Fund Savings",
+  "Investment Savings",
+];
+
+// ✅ FINAL INCOME CATEGORIES (All Income categories combined)
+const INCOME_CATEGORIES = [
+  ...REGULAR_INCOME_CATEGORIES,
+  ...INCOME_INVESTMENT_CATEGORIES,
+  ...INCOME_DEBT_CATEGORIES,
+  ...INCOME_SAVINGS_CATEGORIES,
+];
+
+// ✅ FINAL EXPENSE CATEGORIES (All Expense categories combined)
+// REMOVE GOAL_CATEGORIES from here - we'll add them dynamically
 const EXPENSE_CATEGORIES = [
-  "Inventory", "Salaries", "Rent", "Utilities", "Marketing", "Transport",
-  "Maintenance", "Taxes", "Supplies", "Equipment", "Other Expense",
+  ...REGULAR_EXPENSE_CATEGORIES,
+  ...EXPENSE_INVESTMENT_CATEGORIES,
+  ...EXPENSE_DEBT_CATEGORIES,
+  ...EXPENSE_SAVINGS_CATEGORIES,
 ];
 
 const PAYMENT_MODES = [
@@ -49,16 +175,29 @@ function getPaymentModeLabel(id: string): string {
   return PAYMENT_MODES.find((m) => m.id === id)?.label || id;
 }
 
-export { PAYMENT_MODES, getPaymentModeLabel };
+export { 
+  PAYMENT_MODES, 
+  getPaymentModeLabel, 
+  INCOME_INVESTMENT_CATEGORIES, 
+  EXPENSE_INVESTMENT_CATEGORIES,
+  INCOME_DEBT_CATEGORIES,
+  EXPENSE_DEBT_CATEGORIES,
+  INCOME_CATEGORIES,
+  EXPENSE_CATEGORIES,
+  GOAL_CATEGORIES,
+};
 
 export default function AddTransactionScreen() {
+  const [dynamicGoalCategories, setDynamicGoalCategories] = useState<string[]>([]);
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme !== "light";
   const theme = isDark ? Colors.dark : Colors.light;
   const { addTransaction, updateTransaction, deleteTransaction, transactions } = useApp();
+  const { user } = useAuth();
   const { t } = useLanguage();
-  const params = useLocalSearchParams<{ type?: string; editId?: string }>();
+  const params = useLocalSearchParams<{ type?: string; editId?: string; mode?: string }>();
+  const isPersonalMode = params.mode === "personal";
 
   const CATEGORY_I18N: Record<string, TranslationKey> = {
     "Sales": "sales",
@@ -77,6 +216,30 @@ export default function AddTransactionScreen() {
     "Taxes": "taxes",
     "Supplies": "supplies",
     "Other Expense": "otherExpense",
+    "Stocks": "stocks",
+    "Bonds": "bonds",
+    "Real Estate": "realEstate",
+    "Crypto": "crypto",
+    "Loan": "loan",
+    "Credit Card": "creditCard",
+    "Mortgage": "mortgage",
+    "Personal Loan": "personalLoan",
+    "Dividend": "dividend",
+    "Capital Gains": "capitalGains",
+    "Interest": "interest",
+    "Rental Income": "rentalIncome",
+    "Brokerage": "brokerage",
+    "Property Maintenance": "propertyMaintenance",
+    "Loan Interest": "loanInterest",
+    "Debt Repayment": "debtRepayment",
+    "Savings": "savings",
+    "Goal Contribution": "goalContribution",
+    "Savings Deposit": "savingsDeposit",
+    "Goal Fund": "goalFund",
+    "Savings Transfer": "savingsTransfer",
+    "Goal Savings": "goalSavings",
+    "Emergency Fund Savings": "emergencyFundSavings",
+    "Investment Savings": "investmentSavings",
   };
 
   const editTx = useMemo(
@@ -94,18 +257,59 @@ export default function AddTransactionScreen() {
   const [paymentMode, setPaymentMode] = useState(editTx?.paymentMode ?? "cash");
   const [attachment, setAttachment] = useState(editTx?.attachment ?? "");
   const [showImagePreview, setShowImagePreview] = useState(false);
-const [currencyRefreshKey, setCurrencyRefreshKey] = useState(0);
-const currencyCode = getCurrencyCode();
-const currencySymbol = getCurrencySymbol();
+  const [currencyRefreshKey, setCurrencyRefreshKey] = useState(0);
+  const currencyCode = getCurrencyCode();
+  const currencySymbol = getCurrencySymbol();
+const [selectedGoalId, setSelectedGoalId] = useState<string | null>(
+  editTx?.goalId || null // Also add goalId to your Transaction type
+);
+  useEffect(() => {
+    const unsubscribe = subscribeToCurrencyChanges(() => {
+      console.log("Currency changed, refreshing add-transaction screen");
+      setCurrencyRefreshKey(prev => prev + 1);
+    });
+    return unsubscribe;
+  }, []);
 
-useEffect(() => {
-  const unsubscribe = subscribeToCurrencyChanges(() => {
-    console.log("Currency changed, refreshing add-transaction screen");
-    setCurrencyRefreshKey(prev => prev + 1);
-  });
-  return unsubscribe;
-}, []);
-  const categories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  // Load goals from AsyncStorage
+  useEffect(() => {
+    const loadGoals = async () => {
+      if (!user) return;
+      try {
+        const savedGoals = await AsyncStorage.getItem(`goals_${user.id}`);
+        if (savedGoals) {
+          const goals = JSON.parse(savedGoals);
+          const goalNames = goals
+            .filter((g: any) => g.status === "active")
+            .map((g: any) => g.name);
+          console.log("📊 Loaded goals from AsyncStorage:", goalNames);
+          setDynamicGoalCategories(goalNames);
+        }
+      } catch (error) {
+        console.error("Error loading goals:", error);
+      }
+    };
+    loadGoals();
+  }, [user]);
+
+  // ✅ FIX: Single categories computation that includes goals
+  const categories = useMemo(() => {
+    const baseCategories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+    
+    // Add goal categories if they're not already in the list
+    const uniqueCategories = [...baseCategories];
+    
+    // Add all goal categories (both static and dynamic)
+    const allGoals = [...GOAL_CATEGORIES, ...dynamicGoalCategories];
+    allGoals.forEach(goal => {
+      if (!uniqueCategories.includes(goal)) {
+        uniqueCategories.push(goal);
+      }
+    });
+    
+    console.log("📊 Categories for", type, ":", uniqueCategories.length);
+    return uniqueCategories;
+  }, [type, dynamicGoalCategories]);
 
   const parsedAmount = useMemo(() => parseAmount(amount), [amount]);
   const dateValid = useMemo(() => isValidDateStr(date), [date]);
@@ -125,19 +329,34 @@ useEffect(() => {
   }, [editTx, deleteTransaction]);
 
   const handleSave = useCallback(() => {
-    if (!isValid || parsedAmount === null) return;
-    if (!dateValid) {
-      Alert.alert("Invalid Date", "Please enter a date in YYYY-MM-DD format.");
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    if (editTx) {
-      updateTransaction(editTx.id, { type, amount: parsedAmount, category, note, date, paymentMode, attachment });
-    } else {
-      addTransaction({ type, amount: parsedAmount, category, note, date, paymentMode, attachment });
-    }
-    router.back();
-  }, [isValid, parsedAmount, dateValid, type, category, note, date, paymentMode, attachment, editTx, addTransaction, updateTransaction]);
+  if (!isValid || parsedAmount === null) return;
+  if (!dateValid) {
+    Alert.alert("Invalid Date", "Please enter a date in YYYY-MM-DD format.");
+    return;
+  }
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  
+  const transactionData = {
+    type, 
+    amount: parsedAmount, 
+    category, 
+    note, 
+    date, 
+    paymentMode, 
+    attachment,
+    bookId: isPersonalMode ? "personal" : undefined,
+    goalId: selectedGoalId || null, // ✅ Add this line
+  };
+  
+  console.log("🔵 Saving transaction with goalId:", transactionData.goalId);
+  
+  if (editTx) {
+    updateTransaction(editTx.id, transactionData);
+  } else {
+    addTransaction(transactionData);
+  }
+  router.back();
+}, [isValid, parsedAmount, dateValid, type, category, note, date, paymentMode, attachment, editTx, addTransaction, updateTransaction, isPersonalMode, selectedGoalId]); // ✅ Add selectedGoalId to dependencies
 
   const pickImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -305,20 +524,20 @@ useEffect(() => {
         </View>
 
         <View style={styles.section}>
-  <Text style={[styles.label, { color: theme.textSecondary, fontFamily: "Inter_500Medium" }]}>
-    {t("amount")} ({currencyCode})
-  </Text>
-  <View
-    style={[
-      styles.amountRow,
-      { backgroundColor: theme.card, borderColor: theme.border },
-    ]}
-  >
-    <Text
-      style={[styles.egpSymbol, { color: theme.textSecondary, fontFamily: "Inter_500Medium" }]}
-    >
-      {currencySymbol}
-    </Text>
+          <Text style={[styles.label, { color: theme.textSecondary, fontFamily: "Inter_500Medium" }]}>
+            {t("amount")} ({currencyCode})
+          </Text>
+          <View
+            style={[
+              styles.amountRow,
+              { backgroundColor: theme.card, borderColor: theme.border },
+            ]}
+          >
+            <Text
+              style={[styles.egpSymbol, { color: theme.textSecondary, fontFamily: "Inter_500Medium" }]}
+            >
+              {currencySymbol}
+            </Text>
             <TextInput
               style={[
                 styles.amountInput,
@@ -385,54 +604,137 @@ useEffect(() => {
             Category
           </Text>
           <View style={styles.catGrid}>
-            {categories.map((cat) => (
+            {categories.map((cat) => {
+              // Check if this is a goal category
+              const isGoal = dynamicGoalCategories.includes(cat) || GOAL_CATEGORIES.includes(cat);
+              const isInvestment = type === "income" 
+                ? INCOME_INVESTMENT_CATEGORIES.includes(cat)
+                : EXPENSE_INVESTMENT_CATEGORIES.includes(cat);
+              const isDebt = type === "income"
+                ? INCOME_DEBT_CATEGORIES.includes(cat)
+                : EXPENSE_DEBT_CATEGORIES.includes(cat);
+              const isSavings = type === "income"
+                ? INCOME_SAVINGS_CATEGORIES.includes(cat)
+                : EXPENSE_SAVINGS_CATEGORIES.includes(cat);
+              
+              let categoryColor = theme.text;
+              let categoryEmoji = "";
+              
+              if (isGoal) {
+                categoryColor = '#8B5CF6'; // Purple for goals
+                categoryEmoji = " 🎯";
+              } else if (isInvestment) {
+                categoryColor = '#10B981'; // Green for investment
+                categoryEmoji = " 📈";
+              } else if (isDebt) {
+                categoryColor = '#EF4444'; // Red for debt
+                categoryEmoji = " 💳";
+              } else if (isSavings) {
+                categoryColor = '#3B82F6'; // Blue for savings
+                categoryEmoji = " 💰";
+              }
+              
+              return (
+                <Pressable
+                  key={cat}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setCategory(cat);
+                  }}
+                  style={({ pressed }) => [
+                    styles.catChip,
+                    {
+                      backgroundColor:
+                        category === cat
+                          ? type === "income"
+                            ? theme.income + "22"
+                            : theme.expense + "22"
+                          : theme.card,
+                      borderColor:
+                        category === cat
+                          ? type === "income"
+                            ? theme.income + "88"
+                            : theme.expense + "88"
+                          : theme.border,
+                      opacity: pressed ? 0.7 : 1,
+                      borderWidth: isGoal || isInvestment || isDebt || isSavings ? 2 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.catChipTxt,
+                      {
+                        color:
+                          category === cat
+                            ? type === "income"
+                              ? theme.income
+                              : theme.expense
+                            : categoryColor,
+                        fontFamily:
+                          category === cat ? "Inter_600SemiBold" : "Inter_400Regular",
+                      },
+                    ]}
+                  >
+                    {CATEGORY_I18N[cat] ? t(CATEGORY_I18N[cat]) : cat}
+                    {categoryEmoji}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+{(type === 'income' || (type === 'expense' && (GOAL_CATEGORIES.includes(category) || dynamicGoalCategories.includes(category)))) && dynamicGoalCategories.length > 0 && (
+          <View style={styles.section}>
+            <Text style={[styles.label, { color: theme.textSecondary, fontFamily: "Inter_500Medium" }]}>
+              Link to Goal {type === 'income' ? '(Income will add to goal)' : '(Expense will subtract from goal)'}
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.paymentScroll} contentContainerStyle={styles.paymentScrollContent}>
               <Pressable
-                key={cat}
                 onPress={() => {
                   Haptics.selectionAsync();
-                  setCategory(cat);
+                  setSelectedGoalId(null);
                 }}
                 style={({ pressed }) => [
-                  styles.catChip,
+                  styles.paymentChip,
                   {
-                    backgroundColor:
-                      category === cat
-                        ? type === "income"
-                          ? theme.income + "22"
-                          : theme.expense + "22"
-                        : theme.card,
-                    borderColor:
-                      category === cat
-                        ? type === "income"
-                          ? theme.income + "88"
-                          : theme.expense + "88"
-                        : theme.border,
+                    backgroundColor: !selectedGoalId ? theme.tint + "22" : theme.card,
+                    borderColor: !selectedGoalId ? theme.tint + "88" : theme.border,
                     opacity: pressed ? 0.7 : 1,
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.catChipTxt,
-                    {
-                      color:
-                        category === cat
-                          ? type === "income"
-                            ? theme.income
-                            : theme.expense
-                          : theme.text,
-                      fontFamily:
-                        category === cat ? "Inter_600SemiBold" : "Inter_400Regular",
-                    },
-                  ]}
-                >
-                  {CATEGORY_I18N[cat] ? t(CATEGORY_I18N[cat]) : cat}
+                <Text style={[styles.paymentLabel, { color: !selectedGoalId ? theme.tint : theme.text }]}>
+                  None
                 </Text>
               </Pressable>
-            ))}
+              {dynamicGoalCategories.map((goalName, index) => {
+                const goalId = `goal_${index}`;
+                return (
+                  <Pressable
+                    key={goalId}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setSelectedGoalId(goalId);
+                    }}
+                    style={({ pressed }) => [
+                      styles.paymentChip,
+                      {
+                        backgroundColor: selectedGoalId === goalId ? theme.tint + "22" : theme.card,
+                        borderColor: selectedGoalId === goalId ? theme.tint + "88" : theme.border,
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.paymentLabel, { color: selectedGoalId === goalId ? theme.tint : theme.text }]}>
+                      🎯 {goalName}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
-        </View>
-
+        )}
         <View style={styles.section}>
           <Text style={[styles.label, { color: theme.textSecondary, fontFamily: "Inter_500Medium" }]}>
             {t("date")}

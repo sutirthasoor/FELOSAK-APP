@@ -37,7 +37,7 @@ export interface Transaction {
   attachment: string;
   createdAt: number;
   userId: string;
-  bookId: string;
+  bookId?: string | null; // ✅ Can be "personal", a book ID, or null
 }
 
 export interface Debt {
@@ -534,28 +534,33 @@ const verifyBookPassword = useCallback(async (bookId: string, password: string) 
   }, [user]);
 
   // NEW: Document CRUD operations
-  const addDocument = useCallback(async (document: Omit<Document, "id" | "createdAt" | "userId" | "bookId">) => {
-    if (!user || !activeBook) throw new Error("No active book or user");
-    
-    const newDocument = {
-      ...document,
-      userId: user.id,
-      bookId: activeBook.id,
-      createdAt: Timestamp.now(),
-    };
-    
-    const docRef = await addDoc(collection(db, 'documents'), newDocument);
-    const createdDocument: Document = {
-      ...document,
-      id: docRef.id,
-      createdAt: Date.now(),
-      userId: user.id,
-      bookId: activeBook.id,
-    };
-    
-    setDocuments(prev => [createdDocument, ...prev]);
-    return createdDocument;
-  }, [user, activeBook]);
+// In AppContext.tsx, replace the addDocument function with this:
+
+const addDocument = useCallback(async (document: Omit<Document, "id" | "createdAt" | "userId" | "bookId">) => {
+  if (!user) throw new Error("No user logged in");
+  
+  // Use provided bookId or default to empty string
+  const bookId = document.bookId || "";
+  
+  const newDocument = {
+    ...document,
+    userId: user.id,
+    bookId: bookId,
+    createdAt: Timestamp.now(),
+  };
+  
+  const docRef = await addDoc(collection(db, 'documents'), newDocument);
+  const createdDocument: Document = {
+    ...document,
+    id: docRef.id,
+    createdAt: Date.now(),
+    userId: user.id,
+    bookId: bookId,
+  };
+  
+  setDocuments(prev => [createdDocument, ...prev]);
+  return createdDocument;
+}, [user]);
 
   const updateDocument = useCallback(async (id: string, documentData: Partial<Document>) => {
     if (!user) return;
@@ -631,112 +636,114 @@ const verifyBookPassword = useCallback(async (bookId: string, password: string) 
   }, [loadBookData]);
 
   const loadBooks = useCallback(async () => {
-    const userId = user?.id;
+  const userId = user?.id;
+  
+  console.log("📚 loadBooks called, user:", userId);
+  
+  if (!userId) {
+    console.log("No user found, skipping book load");
+    setIsLoadingBooks(false);
+    setBooks([]);
+    return;
+  }
+  
+  setIsLoadingBooks(true);
+  try {
+    console.log("📚 Loading books for user:", userId);
     
-    console.log("📚 loadBooks called, user:", userId);
+    const loadedBooks: CashBook[] = [];
     
-    if (!userId) {
-      console.log("No user found, skipping book load");
-      setIsLoadingBooks(false);
-      setBooks([]);
-      return;
-    }
+    // 1. Load books the user OWNS
+    const ownedBooksQuery = query(
+      collection(db, 'books'),
+      where('userId', '==', userId)
+    );
+    const ownedBooksSnapshot = await getDocs(ownedBooksQuery);
+    console.log("Found", ownedBooksSnapshot.size, "owned books");
     
-    setIsLoadingBooks(true);
-    try {
-      console.log("📚 Loading books for user:", userId);
+    ownedBooksSnapshot.forEach(doc => {
+      const bookData = doc.data();
+      console.log("📖 Book data from Firestore:", doc.id, bookData);
       
-      const loadedBooks: CashBook[] = [];
-      
-      // 1. ✅ Load books the user OWNS (from books collection)
-      const ownedBooksQuery = query(
-        collection(db, 'books'),
-        where('userId', '==', userId)
-      );
-      const ownedBooksSnapshot = await getDocs(ownedBooksQuery);
-      console.log("Found", ownedBooksSnapshot.size, "owned books");
-      
-      ownedBooksSnapshot.forEach(doc => {
-        const bookData = doc.data();
-        loadedBooks.push({
-          id: doc.id,
-          name: bookData.name || "Unnamed Book",
-          description: bookData.description || "",
-          isCloud: true,
-          role: "owner",
-          createdAt: bookData.createdAt?.toDate?.()?.getTime() || Date.now(),
-          userId: bookData.userId,
-          color: bookData.color,
-          icon: bookData.icon,
-          accessPassword: bookData.accessPassword,
-          passwordProtected: bookData.passwordProtected || false,
-          passwordAccessLevel: bookData.passwordAccessLevel || "read",
-        });
+      loadedBooks.push({
+        id: doc.id,
+        name: bookData.name || "Unnamed Book",
+        description: bookData.description || "",
+        isCloud: true,
+        role: "owner",
+        createdAt: bookData.createdAt?.toDate?.()?.getTime() || Date.now(),
+        userId: bookData.userId,
+        color: bookData.color,
+        icon: bookData.icon,
+        accessPassword: bookData.accessPassword,
+        passwordProtected: bookData.passwordProtected || false,
+        passwordAccessLevel: bookData.passwordAccessLevel || "read",
+        type: bookData.type || "personal", // ✅ READ TYPE
+        category: bookData.category || "assets", // ✅ READ CATEGORY
       });
+    });
+    
+    // 2. Load shared books
+    const userBooksQuery = query(
+      collection(db, 'userBooks'),
+      where('userId', '==', userId)
+    );
+    const userBooksSnapshot = await getDocs(userBooksQuery);
+    console.log("Found", userBooksSnapshot.size, "shared book entries");
+    
+    for (const ubDoc of userBooksSnapshot.docs) {
+      const userBookData = ubDoc.data();
+      const bookId = userBookData.bookId;
       
-      // 2. ✅ Load books SHARED with the user (from userBooks collection)
-      const userBooksQuery = query(
-        collection(db, 'userBooks'),
-        where('userId', '==', userId)
-      );
-      const userBooksSnapshot = await getDocs(userBooksQuery);
-      console.log("Found", userBooksSnapshot.size, "shared book entries");
+      if (!bookId) continue;
       
-      for (const ubDoc of userBooksSnapshot.docs) {
-        const userBookData = ubDoc.data();
-        const bookId = userBookData.bookId;
-        
-        if (!bookId) continue;
-        
-        const bookRef = doc(db, 'books', bookId);
-        const bookSnap = await getDoc(bookRef);
-        
-        if (bookSnap.exists()) {
-          const bookData = bookSnap.data();
-          // Check if not already added as owned
-          if (!loadedBooks.some(b => b.id === bookSnap.id)) {
-            loadedBooks.push({
-              id: bookSnap.id,
-              name: bookData.name || "Unnamed Book",
-              description: bookData.description || "",
-              isCloud: true,
-              role: userBookData.role || "viewer",
-              createdAt: bookData.createdAt?.toDate?.()?.getTime() || Date.now(),
-              userId: bookData.userId,
-              color: bookData.color,
-              icon: bookData.icon,
-              accessPassword: bookData.accessPassword,
-              passwordProtected: bookData.passwordProtected || false,
-            });
-            console.log("✅ Loaded shared book:", bookData.name);
-          }
+      const bookRef = doc(db, 'books', bookId);
+      const bookSnap = await getDoc(bookRef);
+      
+      if (bookSnap.exists()) {
+        const bookData = bookSnap.data();
+        if (!loadedBooks.some(b => b.id === bookSnap.id)) {
+          loadedBooks.push({
+            id: bookSnap.id,
+            name: bookData.name || "Unnamed Book",
+            description: bookData.description || "",
+            isCloud: true,
+            role: userBookData.role || "viewer",
+            createdAt: bookData.createdAt?.toDate?.()?.getTime() || Date.now(),
+            userId: bookData.userId,
+            color: bookData.color,
+            icon: bookData.icon,
+            accessPassword: bookData.accessPassword,
+            passwordProtected: bookData.passwordProtected || false,
+            type: bookData.type || "personal", // ✅ READ TYPE
+            category: bookData.category || "assets", // ✅ READ CATEGORY
+          });
+          console.log("✅ Loaded shared book:", bookData.name);
         }
       }
-      
-      console.log("Total books loaded:", loadedBooks.length);
-      setBooks(loadedBooks);
-      
-      if (loadedBooks.length > 0) {
-        const lastActiveBookId = await AsyncStorage.getItem(LAST_ACTIVE_BOOK_KEY);
-        const bookToActivate = lastActiveBookId 
-          ? loadedBooks.find(b => b.id === lastActiveBookId) 
-          : loadedBooks[0];
-        
-        if (bookToActivate) {
-          console.log("Activating book:", bookToActivate.name);
-          setActiveBook(bookToActivate);
-        }
-      } else {
-        console.log("No books found for user");
-        setActiveBook(null);
-      }
-      
-    } catch (error) {
-      console.error("Failed to load books:", error);
-    } finally {
-      setIsLoadingBooks(false);
     }
-  }, [user, setActiveBook]);
+    
+    console.log("Total books loaded:", loadedBooks.length);
+    console.log("📚 Loaded books with types:", loadedBooks.map(b => ({ name: b.name, type: b.type, category: b.category })));
+    setBooks(loadedBooks);
+    
+    // Only set active book if there's a last active book saved
+    const lastActiveBookId = await AsyncStorage.getItem(LAST_ACTIVE_BOOK_KEY);
+    if (lastActiveBookId) {
+      const bookToActivate = loadedBooks.find(b => b.id === lastActiveBookId);
+      if (bookToActivate) {
+        console.log("Activating book:", bookToActivate.name);
+        setActiveBook(bookToActivate);
+      }
+    }
+    // Don't auto-activate the first book - let user choose
+    
+  } catch (error) {
+    console.error("Failed to load books:", error);
+  } finally {
+    setIsLoadingBooks(false);
+  }
+}, [user, setActiveBook]);
 
   useEffect(() => {
     if (user && activeBook) {
@@ -750,37 +757,42 @@ const verifyBookPassword = useCallback(async (bookId: string, password: string) 
   }, [loadBooks]);
 
 const createBook = useCallback(async (name: string, description: string, isCloud: boolean, icon?: string, accessPassword?: string, defaultAccess?: "read" | "write") => {
-    if (!user) {
-      console.error("Cannot create book: User not authenticated");
-      throw new Error("You must be logged in to create a book");
-    }
-    
-    const newBook: Omit<CashBook, "id"> = {
-  name,
-  description,
-  isCloud: true,
-  role: "owner",
-  createdAt: Date.now(),
-  userId: user.id,
-  color: "#" + Math.floor(Math.random()*16777215).toString(16),
-  icon: icon || "📒",
-  accessPassword: accessPassword,
-  passwordProtected: !!accessPassword,
-  defaultAccess: defaultAccess || "read",  // ← ADD THIS LINE
-};
+  if (!user) {
+    console.error("Cannot create book: User not authenticated");
+    throw new Error("You must be logged in to create a book");
+  }
+  
+  const newBook: Omit<CashBook, "id"> = {
+    name,
+    description,
+    isCloud: true,
+    role: "owner",
+    createdAt: Date.now(),
+    userId: user.id,
+    color: "#" + Math.floor(Math.random()*16777215).toString(16),
+    icon: icon || "📒",
+    accessPassword: accessPassword,
+    passwordProtected: !!accessPassword,
+    defaultAccess: defaultAccess || "read",
+  };
 
-    const docRef = await addDoc(collection(db, 'books'), {
-      ...newBook,
-      createdAt: Timestamp.now(),
-      accessPassword: accessPassword || null,
-      passwordProtected: !!accessPassword,
-      passwordAccessLevel: defaultAccess || "read",
-    });
-    
-    const createdBook = { ...newBook, id: docRef.id };
-    setBooks(prev => [createdBook, ...prev]);
-    setActiveBook(createdBook);
-  }, [user, setActiveBook]);
+  const docRef = await addDoc(collection(db, 'books'), {
+    ...newBook,
+    createdAt: Timestamp.now(),
+    accessPassword: accessPassword || null,
+    passwordProtected: !!accessPassword,
+    passwordAccessLevel: defaultAccess || "read",
+  });
+  
+  const createdBook = { ...newBook, id: docRef.id };
+  setBooks(prev => [createdBook, ...prev]);
+  
+  // REMOVE THIS LINE - Don't auto-activate
+  // setActiveBook(createdBook);
+  
+  // Optionally, refresh books to get the latest list
+  // await loadBooks(); // or refreshBooks()
+}, [user, setActiveBook]);
 
   const deleteBook = useCallback(async (id: string) => {
     if (!user) return;
@@ -842,32 +854,43 @@ const createBook = useCallback(async (name: string, description: string, isCloud
     }
   }, [loadBooks, loadBookData, activeBook]);
 
-  const addTransaction = useCallback(async (t: Omit<Transaction, "id" | "createdAt" | "userId" | "bookId">) => {
-    if (!user) throw new Error("User not authenticated");
-    if (!activeBook) throw new Error("No active book selected");
-    
-    console.log("Adding transaction to book:", activeBook.id, "User:", user.id);
-    
-    const newTransaction = {
-      ...t,
-      userId: user.id,
-      bookId: activeBook.id,
-      createdAt: Timestamp.now(),
-    };
-    
-    const docRef = await addDoc(collection(db, 'transactions'), newTransaction);
-    console.log("Transaction saved with ID:", docRef.id);
-    
-    const createdTx: Transaction = {
-      ...t,
-      id: docRef.id,
-      createdAt: Date.now(),
-      userId: user.id,
-      bookId: activeBook.id,
-    };
-    
-    setTransactions(prev => [createdTx, ...prev]);
-  }, [user, activeBook]);
+// In AppContext.tsx, add this to addTransaction
+const addTransaction = useCallback(async (t: Omit<Transaction, "id" | "createdAt" | "userId" | "bookId">) => {
+  if (!user) throw new Error("User not authenticated");
+  
+  // If bookId is explicitly set to null, it's a personal transaction
+  // Otherwise, use activeBook.id
+  const bookId = t.bookId !== undefined ? t.bookId : activeBook?.id || null;
+  
+  console.log("Adding transaction:", { ...t, bookId, isPersonal: bookId === null });
+  
+  const newTransaction = {
+    ...t,
+    userId: user.id,
+    bookId: bookId,
+    createdAt: Timestamp.now(),
+  };
+  
+  const docRef = await addDoc(collection(db, 'transactions'), newTransaction);
+  console.log("Transaction saved with ID:", docRef.id);
+  
+  const createdTx: Transaction = {
+    ...t,
+    id: docRef.id,
+    createdAt: Date.now(),
+    userId: user.id,
+    bookId: bookId,
+  };
+  
+  setTransactions(prev => [createdTx, ...prev]);
+  
+  // If it's a personal transaction (bookId === null), also trigger a refresh for goals
+  if (bookId === null || bookId === "personal") {
+    // This will trigger the useEffect in the main screen to update goals
+    console.log("✅ Personal transaction added, goals will be updated");
+  }
+  
+}, [user, activeBook]);
 
   const updateTransaction = useCallback(async (id: string, t: Partial<Transaction>) => {
     if (!user) return;

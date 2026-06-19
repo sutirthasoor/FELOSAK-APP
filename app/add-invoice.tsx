@@ -55,43 +55,80 @@ useEffect(() => {
   const bottomPad = insets.bottom + (Platform.OS === "web" ? 20 : 10);
 
   const handleSave = async () => {
-    if (!customerName.trim()) {
-      Alert.alert("Error", "Please enter customer name");
-      return;
-    }
-    if (!amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
-      Alert.alert("Error", "Please enter a valid amount");
-      return;
-    }
-    if (!activeBook) {
-      Alert.alert("Error", "No active book selected");
-      return;
-    }
+  console.log("🔵🔵🔵 SAVE INVOICE BUTTON PRESSED 🔵🔵🔵");
+  console.log("🔵 customerName:", customerName);
+  console.log("🔵 amount:", amount);
+  console.log("🔵 activeBook:", activeBook?.id);
+  console.log("🔵 docType from params:", params.docType);
+  
+  if (!customerName.trim()) {
+    Alert.alert("Error", "Please enter customer name");
+    return;
+  }
+  if (!amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+    Alert.alert("Error", "Please enter a valid amount");
+    return;
+  }
+  if (!activeBook) {
+    Alert.alert("Error", "No active book selected");
+    return;
+  }
 
-    setLoading(true);
-    try {
-      const invoiceData = {
-        number: invoiceNumber.trim() || `INV-${Date.now()}`,
-        customerId: "", // You can implement customer selection later
-        customerName: customerName.trim(),
-        amount: parseFloat(amount),
-        status: status,
-        dueDate: dueDate || new Date().toISOString().split('T')[0],
-        invoiceDate: new Date().toISOString().split('T')[0],
-        items: [], // You can add items functionality later
-        notes: note,
-      };
+  setLoading(true);
+  try {
+    // Get the document type from params or default to Invoice
+    const docType = (params.docType as string) || "Invoice";
+    
+    // Create the document data structure that matches your Document type
+    const documentData = {
+      number: invoiceNumber.trim() || `${docType.substring(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+      type: docType,
+      partyName: customerName.trim(),
+      amount: parseFloat(amount),
+      date: new Date().toISOString().split('T')[0],
+      dueDate: dueDate || undefined,
+      notes: note || undefined,
+      status: status,
+      bookId: activeBook.id,
+      userId: activeBook.userId || "unknown",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
 
-      await addInvoice(invoiceData);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.back();
-    } catch (error: any) {
-      Alert.alert("Error", error.message || "Failed to save invoice");
-    } finally {
-      setLoading(false);
+    console.log("🔵 documentData:", documentData);
+    
+    // Use the correct function - check if addDocument exists
+    if (typeof addDocument === 'function') {
+      await addDocument(documentData);
+      console.log("✅ Document saved successfully via addDocument!");
+    } else if (typeof addInvoice === 'function') {
+      // Fallback to addInvoice if it exists
+      await addInvoice(documentData);
+      console.log("✅ Document saved successfully via addInvoice!");
+    } else {
+      // If neither function exists, try to save to Firestore directly
+      console.log("⚠️ Neither addDocument nor addInvoice found, saving directly...");
+      const { db } = await import('@/config/firebase');
+      const { collection, addDoc, Timestamp } = await import('firebase/firestore');
+      await addDoc(collection(db, 'documents'), {
+        ...documentData,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+      console.log("✅ Document saved directly to Firestore!");
     }
-  };
-
+    
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert("Success", `${docType} created successfully`);
+    router.back();
+  } catch (error: any) {
+    console.error("🔴 Error saving document:", error);
+    Alert.alert("Error", error.message || "Failed to save document");
+  } finally {
+    setLoading(false);
+    console.log("🔵 Loading set to false");
+  }
+};
   return (
     <View key={currencyRefreshKey} style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Header */}
@@ -111,11 +148,18 @@ useEffect(() => {
         <Text style={[styles.headerTitle, { color: theme.text, fontFamily: "Inter_600SemiBold" }]}>
           {editId ? (isAr ? "تعديل فاتورة" : "Edit Invoice") : (isAr ? "فاتورة جديدة" : "New Invoice")}
         </Text>
-        <Pressable onPress={handleSave} disabled={loading} hitSlop={8}>
-          <Text style={[styles.saveText, { color: theme.tint, fontFamily: "Inter_600SemiBold", opacity: loading ? 0.5 : 1 }]}>
-            {loading ? (isAr ? "جاري الحفظ..." : "Saving...") : (isAr ? "حفظ" : "Save")}
-          </Text>
-        </Pressable>
+        <Pressable 
+  onPress={() => {
+    console.log("🔵🔵🔵 SAVE BUTTON CLICKED - ARROW FUNCTION 🔵🔵🔵");
+    handleSave();
+  }} 
+  disabled={loading} 
+  hitSlop={8}
+>
+  <Text style={[styles.saveText, { color: theme.tint, fontFamily: "Inter_600SemiBold", opacity: loading ? 0.5 : 1 }]}>
+    {loading ? (isAr ? "جاري الحفظ..." : "Saving...") : (isAr ? "حفظ" : "Save")}
+  </Text>
+</Pressable>
       </View>
 
       <ScrollView contentContainerStyle={[styles.content, { flexGrow: 1, paddingBottom: 40 }]}>

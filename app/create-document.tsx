@@ -17,7 +17,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useApp } from "@/context/AppContext";
-import { formatAmount, getCurrencyCode, getCurrencySymbol, subscribeToCurrencyChanges } from "@/utils/format";
+import { getCurrencyCode, getCurrencySymbol, subscribeToCurrencyChanges } from "@/utils/format";
 
 // IMPORTANT: Use exact names that match DOCUMENT_CONFIG in invoices.tsx
 type DocumentType = "Invoice" | "Quote" | "Credit Note" | "Purchase Order" | "Delivery Note";
@@ -136,51 +136,69 @@ const formatAmount = (amount: number) => `${currencyCode} ${amount.toLocaleStrin
   };
 
   const handleSave = async () => {
-    if (!partyName.trim()) {
-      Alert.alert("Error", `Please enter ${getPartyLabel().toLowerCase()}`);
-      return;
-    }
-    if (items.length === 0) {
-      Alert.alert("Error", "Please add at least one item");
-      return;
+  console.log("🔵🔵🔵 SAVE BUTTON PRESSED 🔵🔵🔵");
+  
+  if (!partyName.trim()) {
+    Alert.alert("Error", `Please enter ${getPartyLabel().toLowerCase()}`);
+    return;
+  }
+  if (items.length === 0) {
+    Alert.alert("Error", "Please add at least one item");
+    return;
+  }
+  
+  try {
+    const newDocument: any = {
+      number: getDocumentNumber(),
+      type: documentType,
+      partyName: partyName.trim(),
+      amount: total,
+      date: documentDate,
+      status: "unpaid",
+      dueDate: dueDate || getDefaultDueDate(),
+      notes: notes,
+      items: items,
+      // Remove bookId and userId if you don't need them
+      // Or set them to empty/default values
+      bookId: "", // or null
+      userId: "", // or null
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    
+    if (needsReferenceAndOrder()) {
+      newDocument.referenceNo = referenceNo;
+      newDocument.orderNo = orderNo;
     }
     
-    if (!activeBook) {
-      Alert.alert("Error", "No active book selected");
-      return;
-    }
+    console.log("🔵 Saving document:", newDocument);
     
-    try {
-      const newDocument: any = {
-        number: getDocumentNumber(),
-        type: documentType, // Exact name like "Credit Note", matches DOCUMENT_CONFIG
-        partyName: partyName.trim(),
-        amount: total,
-        date: documentDate,
-        status: "unpaid", // CHANGE THIS: Use "unpaid" instead of "draft" so status shows correctly
-        dueDate: dueDate || getDefaultDueDate(),
-        notes: notes,
-        items: items,
-      };
-      
-      // Add reference and order fields only for non-Invoice documents that need them
-      if (needsReferenceAndOrder()) {
-        newDocument.referenceNo = referenceNo;
-        newDocument.orderNo = orderNo;
-      }
-      
-      console.log("Saving document:", newDocument);
+    // Use addDocument if available, otherwise save directly
+    if (typeof addDocument === 'function') {
       await addDocument(newDocument);
+      console.log("✅ Document saved via addDocument!");
+    } else {
+      // Save directly to Firestore
+      const { db } = await import('@/config/firebase');
+      const { collection, addDoc, Timestamp } = await import('firebase/firestore');
       
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Success", `${documentType} created successfully!`, [
-        { text: "OK", onPress: () => router.back() }
-      ]);
-    } catch (error: any) {
-      console.error("Save error:", error);
-      Alert.alert("Error", error.message || "Failed to save document");
+      await addDoc(collection(db, 'documents'), {
+        ...newDocument,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+      console.log("✅ Document saved directly to Firestore!");
     }
-  };
+    
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert("Success", `${documentType} created successfully!`, [
+      { text: "OK", onPress: () => router.back() }
+    ]);
+  } catch (error: any) {
+    console.error("🔴 Save error:", error);
+    Alert.alert("Error", error.message || "Failed to save document");
+  }
+};
 
   return (
     <View style={[styles.container, { backgroundColor: "#FFFFFF", paddingTop: topPad }]}>
